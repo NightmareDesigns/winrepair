@@ -2,10 +2,19 @@
 setlocal EnableDelayedExpansion
 
 :: ============================================================
-:: winrepair.bat - Windows Automatic Repair Script
-:: Runs common Windows repair tools in sequence and logs output.
+:: winrepair.bat  -  Online Mode Windows Repair Script
+::
+:: Runs from inside a live (bootable) Windows session.
 :: Creates a System Restore Point, backs up user files and the
-:: Registry BEFORE making any changes so nothing is ever lost.
+:: Registry BEFORE making any changes so nothing is ever lost,
+:: then runs DISM, SFC, CHKDSK, temp cleanup, network reset,
+:: and a Windows Update scan.
+::
+:: If Windows will NOT boot at all, use the offline repair path:
+::   1. Run build\build_winpe_usb.bat  (on a working PC)
+::      to create a bootable repair USB from this repository.
+::   2. Boot the broken PC from that USB.
+::   3. winrepair_offline.bat starts automatically.
 :: ============================================================
 
 :: ---- Setup log file ----------------------------------------
@@ -19,15 +28,21 @@ for /f "usebackq" %%i in (`powershell -NoProfile -NonInteractive -Command "Get-D
 set "LOG_FILE=%LOG_DIR%\winrepair_%D%_%T%.log"
 
 :: ---- Title and header --------------------------------------
-title Windows Repair Script
+title Windows Repair Script  [Online Mode]
 echo.
 echo ============================================================
-echo  Windows Automatic Repair Script
+echo  Windows Automatic Repair Script  [ONLINE MODE]
+echo  Running inside a live Windows session.
 echo  Log: %LOG_FILE%
 echo ============================================================
 echo.
+echo  NOTE: This script repairs Windows while it is running.
+echo        If Windows cannot boot at all, use the offline path:
+echo          build\build_winpe_usb.bat  to create a bootable USB
+echo          then boot from the USB to run winrepair_offline.bat
+echo.
 
-call :log "Windows Automatic Repair Script started at %DATE% %TIME%"
+call :log "Windows Automatic Repair Script [Online Mode] started at %DATE% %TIME%"
 call :log "============================================================"
 
 :: ---- Administrator check -----------------------------------
@@ -239,8 +254,8 @@ echo.
 set "SYS_DRIVE=%SystemDrive%"
 
 :: Ask whether to also scan for bad sectors (takes much longer)
-set /p "DO_BADSECTOR=Also scan for bad sectors? WARNING: takes 1-8 hours (Y/N) [N]: "
-if /i "%DO_BADSECTOR%"=="Y" (
+set /p "SCAN_BAD_SECTORS=Also scan for bad sectors? WARNING: takes 1-8 hours (Y/N) [N]: "
+if /i "%SCAN_BAD_SECTORS%"=="Y" (
     set "CHKDSK_FLAGS=/f /r /x"
     call :log "User chose full chkdsk with bad-sector scan (/f /r /x)."
 ) else (
