@@ -40,7 +40,7 @@ if %errorlevel% neq 0 (
     echo [ERROR] This script must be run as Administrator.
     echo         Right-click the script and choose "Run as administrator".
     echo.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
@@ -72,7 +72,7 @@ echo.
 echo  2. Windows PE add-on for the ADK (on the same download page):
 echo     Select "Download Windows PE add-on for the Windows ADK"
 echo.
-pause
+if not defined CI pause
 exit /b 1
 
 :adk_found
@@ -93,28 +93,37 @@ echo.
 if not exist "%REPO_ROOT%\winrepair_offline.bat" (
     echo [ERROR] winrepair_offline.bat not found at %REPO_ROOT%
     echo         Run this script from the build\ subfolder of the repository.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 if not exist "%REPO_ROOT%\winpe\startnet.cmd" (
     echo [ERROR] winpe\startnet.cmd not found at %REPO_ROOT%\winpe\
     echo         Run this script from the build\ subfolder of the repository.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
 :: ---- Architecture selection ---------------------------------
-echo Select WinPE architecture:
-echo   [1] amd64   (64-bit Intel/AMD - recommended for most PCs)
-echo   [2] arm64   (ARM 64-bit - Surface Pro X, Snapdragon PCs)
-echo.
-set /p "ARCH_SEL=Architecture [1]: "
-if /i "%ARCH_SEL%"=="2" (
-    set "ARCH=arm64"
+if defined CI (
+    if /i "%WINREPAIR_ARCH%"=="arm64" (
+        set "ARCH=arm64"
+    ) else (
+        set "ARCH=amd64"
+    )
+    echo CI mode detected. Using architecture: %ARCH%
 ) else (
-    set "ARCH=amd64"
+    echo Select WinPE architecture:
+    echo   [1] amd64   (64-bit Intel/AMD - recommended for most PCs)
+    echo   [2] arm64   (ARM 64-bit - Surface Pro X, Snapdragon PCs)
+    echo.
+    set /p "ARCH_SEL=Architecture [1]: "
+    if /i "%ARCH_SEL%"=="2" (
+        set "ARCH=arm64"
+    ) else (
+        set "ARCH=amd64"
+    )
+    echo Using architecture: %ARCH%
 )
-echo Using architecture: %ARCH%
 echo.
 
 :: ---- Output ISO path ----------------------------------------
@@ -139,7 +148,7 @@ if %errorlevel% neq 0 (
     echo.
     echo [ERROR] copype.cmd failed (exit code %errorlevel%).
     echo         Ensure the WinPE add-on is installed for the ADK.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 echo [OK] WinPE working environment created.
@@ -160,7 +169,7 @@ if %errorlevel% neq 0 (
     echo [ERROR] DISM failed to mount boot.wim (exit code %errorlevel%).
     rd /s /q "%MOUNT_DIR%" 2>nul
     rd /s /q "%WORK_DIR%" 2>nul
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
@@ -170,7 +179,7 @@ if %errorlevel% neq 0 (
     Dism /Unmount-Image /MountDir:"%MOUNT_DIR%" /Discard >nul 2>&1
     rd /s /q "%MOUNT_DIR%" 2>nul
     rd /s /q "%WORK_DIR%" 2>nul
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
@@ -180,7 +189,7 @@ if %errorlevel% neq 0 (
     echo [ERROR] DISM failed to commit WinPE image changes (exit code %errorlevel%).
     rd /s /q "%MOUNT_DIR%" 2>nul
     rd /s /q "%WORK_DIR%" 2>nul
-    pause
+    if not defined CI pause
     exit /b 1
 )
 rd /s /q "%MOUNT_DIR%" 2>nul
@@ -197,7 +206,7 @@ copy /y "%REPO_ROOT%\winrepair_offline.bat" "%WORK_DIR%\media\winrepair\" >nul 2
 if %errorlevel% neq 0 (
     echo [ERROR] Could not copy winrepair_offline.bat into the ISO media.
     rd /s /q "%WORK_DIR%" 2>nul
-    pause
+    if not defined CI pause
     exit /b 1
 )
 copy /y "%REPO_ROOT%\winrepair.bat" "%WORK_DIR%\media\winrepair\" >nul 2>&1
@@ -216,7 +225,7 @@ if %errorlevel% neq 0 (
     echo.
     echo [ERROR] MakeWinPEMedia /ISO failed (exit code %errorlevel%).
     rd /s /q "%WORK_DIR%" 2>nul
-    pause
+    if not defined CI pause
     exit /b 1
 )
 echo [OK] ISO created successfully.
@@ -261,5 +270,5 @@ echo    4. Boot the VM
 echo.
 echo  After booting from the USB or DVD, the repair tool starts automatically.
 echo.
-pause
+if not defined CI pause
 exit /b 0

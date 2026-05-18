@@ -1,0 +1,50 @@
+name: Build WinPE ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: WinPE architecture
+        required: true
+        type: choice
+        default: amd64
+        options:
+          - amd64
+          - arm64
+
+permissions:
+  contents: read
+
+jobs:
+  build-iso:
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Windows ADK
+        shell: pwsh
+        run: |
+          winget install --id Microsoft.WindowsADK -e --silent --accept-package-agreements --accept-source-agreements
+
+      - name: Install Windows ADK WinPE Add-on
+        shell: pwsh
+        run: |
+          winget install --id Microsoft.WindowsADK.WinPEAddon -e --silent --accept-package-agreements --accept-source-agreements
+
+      - name: Build WinPE ISO
+        shell: cmd
+        env:
+          CI: true
+          WINREPAIR_ARCH: ${{ inputs.architecture }}
+        run: |
+          build\build_winpe_iso.bat
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winrepair-${{ inputs.architecture }}-iso
+          path: winrepair_${{ inputs.architecture }}.iso
+          if-no-files-found: error
