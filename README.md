@@ -56,6 +56,15 @@ Do this on a **working Windows PC** (not the broken one).
 > **Want an ISO instead?** Run **`build\build_winpe_iso.bat`** — it produces `winrepair_amd64.iso`.  
 > Flash it to USB with [Rufus](https://rufus.ie) (ISO Image mode) or burn it to a DVD.
 
+### Build ISO in GitHub Actions
+
+You can also build the ISO from this repository in GitHub:
+
+1. Open the **Actions** tab.
+2. Run **Build WinPE ISO**.
+3. Choose `amd64` or `arm64`.
+4. Download the generated ISO from the workflow artifacts.
+
 ---
 
 ### Step 2 — Boot the broken PC from the USB
@@ -242,4 +251,3 @@ Personal data must remain intact across all runs.
 | Multiple Windows installs | Two Windows partitions on one disk | Script lists both; user selects one; only selected partition is repaired |
 | Dual-drive setup | Windows on C:, backup on E: | User profiles backed up to E:; repair runs on C:; E: untouched |
 | Large profile (50 GB+) | User has 50 GB of documents | Robocopy completes without timeout; no files missing from backup |
-
