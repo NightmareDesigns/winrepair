@@ -71,6 +71,7 @@ jobs:
             echo Please use arm64 or a self-hosted runner with a full ADK + WinPE add-on installation.
             exit /b 1
           )
+          call "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\DandISetEnv.bat"
           build\build_winpe_iso.bat
 
       - name: Upload ISO artifact
