@@ -35,8 +35,9 @@ jobs:
         shell: pwsh
         run: |
           $ProgressPreference = 'SilentlyContinue'
+          $adkInstallPath = "${env:ProgramFiles(x86)}\Windows Kits\10"
           Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2196224" -OutFile "$env:TEMP\adkwinpesetup.exe"
-          Start-Process -FilePath "$env:TEMP\adkwinpesetup.exe" -ArgumentList "/quiet /norestart /ceip off /features OptionId.WindowsPreinstallationEnvironment" -Wait -NoNewWindow
+          Start-Process -FilePath "$env:TEMP\adkwinpesetup.exe" -ArgumentList "/quiet /norestart /ceip off /installpath `"$adkInstallPath`" /features OptionId.WindowsPreinstallationEnvironment" -Wait -NoNewWindow
 
       - name: Verify ADK installation
         shell: pwsh
