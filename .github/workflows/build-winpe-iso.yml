@@ -41,9 +41,22 @@ jobs:
       - name: Verify ADK installation
         shell: pwsh
         run: |
-          $copype = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Windows Preinstallation Environment\copype.cmd"
+          $adkRoot = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit"
+          $copype = Join-Path $adkRoot "Windows Preinstallation Environment\copype.cmd"
+
           if (-not (Test-Path $copype)) {
             Write-Error "WinPE tools were not installed correctly. Missing: $copype"
+          }
+
+          $amd64Media = Join-Path $adkRoot "Windows Preinstallation Environment\amd64\Media"
+          $arm64Media = Join-Path $adkRoot "Windows Preinstallation Environment\arm64\Media"
+
+          Write-Host "copype.cmd found at: $copype"
+          Write-Host "amd64 media present: $(Test-Path $amd64Media)"
+          Write-Host "arm64 media present: $(Test-Path $arm64Media)"
+
+          if (-not (Test-Path $amd64Media)) {
+            Write-Host "::warning::amd64 WinPE media was not found in the default ADK location. This runner image may not support building amd64 WinPE with the installed add-on."
           }
 
       - name: Build WinPE ISO
@@ -52,6 +65,11 @@ jobs:
           CI: true
           WINREPAIR_ARCH: ${{ inputs.architecture }}
         run: |
+          if /I "${{ inputs.architecture }}"=="amd64" if not exist "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Windows Preinstallation Environment\amd64\Media" (
+            echo amd64 WinPE media is unavailable on this runner image.
+            echo Please use arm64 or a self-hosted runner with a full ADK + WinPE add-on installation.
+            exit /b 1
+          )
           build\build_winpe_iso.bat
 
       - name: Upload ISO artifact
