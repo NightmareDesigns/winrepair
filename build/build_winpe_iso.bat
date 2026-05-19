@@ -1,5 +1,8 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal DisableDelayedExpansion
+
+:: Keep delayed expansion off while handling filesystem paths so
+:: repo/TEMP paths containing ! or parentheses are passed verbatim.
 
 :: ============================================================
 :: build_winpe_iso.bat  -  Build a bootable WinPE repair ISO
@@ -35,14 +38,7 @@ setlocal EnableDelayedExpansion
 
 :: ---- Admin check --------------------------------------------
 net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] This script must be run as Administrator.
-    echo         Right-click the script and choose "Run as administrator".
-    echo.
-    if not defined CI pause
-    exit /b 1
-)
+if errorlevel 1 goto :admin_error
 
 echo.
 echo ============================================================
@@ -72,7 +68,7 @@ echo.
 echo  2. Windows PE add-on for the ADK (on the same download page):
 echo     Select "Download Windows PE add-on for the Windows ADK"
 echo.
-if not defined CI pause
+call :pause_if_needed
 exit /b 1
 
 :adk_found
@@ -82,48 +78,46 @@ echo [OK] Windows ADK found: %ADK_ROOT%
 echo.
 
 :: ---- Resolve repo root (one level up from build\) -----------
-set "SCRIPT_DIR=%~dp0"
-set "REPO_ROOT=%SCRIPT_DIR:~0,-1%"
-for %%R in ("%REPO_ROOT%") do set "REPO_ROOT=%%~dpR"
-set "REPO_ROOT=%REPO_ROOT:~0,-1%"
+for %%R in ("%~dp0..") do set "REPO_ROOT=%%~fR"
+if "%REPO_ROOT:~-1%"=="\" set "REPO_ROOT=%REPO_ROOT:~0,-1%"
 echo Repository root: %REPO_ROOT%
 echo.
 
-:: Sanity checks
-if not exist "%REPO_ROOT%\winrepair_offline.bat" (
-    echo [ERROR] winrepair_offline.bat not found at %REPO_ROOT%
-    echo         Run this script from the build\ subfolder of the repository.
-    if not defined CI pause
-    exit /b 1
-)
-if not exist "%REPO_ROOT%\winpe\startnet.cmd" (
-    echo [ERROR] winpe\startnet.cmd not found at %REPO_ROOT%\winpe\
-    echo         Run this script from the build\ subfolder of the repository.
-    if not defined CI pause
-    exit /b 1
-)
+:: Avoid parenthesized IF blocks around path variables; CMD can
+:: misparse quoted paths containing literal parentheses.
+if exist "%REPO_ROOT%\winrepair_offline.bat" goto :have_offline_script
+echo [ERROR] winrepair_offline.bat not found at %REPO_ROOT%
+echo         Run this script from the build\ subfolder of the repository.
+call :pause_if_needed
+exit /b 1
 
+:have_offline_script
+if exist "%REPO_ROOT%\winpe\startnet.cmd" goto :have_startnet
+echo [ERROR] winpe\startnet.cmd not found at %REPO_ROOT%\winpe\
+echo         Run this script from the build\ subfolder of the repository.
+call :pause_if_needed
+exit /b 1
+
+:have_startnet
 :: ---- Architecture selection ---------------------------------
-if defined CI (
-    if /i "%WINREPAIR_ARCH%"=="arm64" (
-        set "ARCH=arm64"
-    ) else (
-        set "ARCH=amd64"
-    )
-    echo CI mode detected. Using architecture: %ARCH%
-) else (
-    echo Select WinPE architecture:
-    echo   [1] amd64   (64-bit Intel/AMD - recommended for most PCs)
-    echo   [2] arm64   (ARM 64-bit - Surface Pro X, Snapdragon PCs)
-    echo.
-    set /p "ARCH_SEL=Architecture [1]: "
-    if /i "%ARCH_SEL%"=="2" (
-        set "ARCH=arm64"
-    ) else (
-        set "ARCH=amd64"
-    )
-    echo Using architecture: %ARCH%
-)
+if defined CI goto :select_ci_architecture
+
+echo Select WinPE architecture:
+echo   [1] amd64   (64-bit Intel/AMD - recommended for most PCs)
+echo   [2] arm64   (ARM 64-bit - Surface Pro X, Snapdragon PCs)
+echo.
+set /p "ARCH_SEL=Architecture [1]: "
+if /i "%ARCH_SEL%"=="2" set "ARCH=arm64"
+if /i not "%ARCH_SEL%"=="2" set "ARCH=amd64"
+echo Using architecture: %ARCH%
+goto :architecture_selected
+
+:select_ci_architecture
+if /i "%WINREPAIR_ARCH%"=="arm64" set "ARCH=arm64"
+if /i not "%WINREPAIR_ARCH%"=="arm64" set "ARCH=amd64"
+echo CI mode detected. Using architecture: %ARCH%
+
+:architecture_selected
 echo.
 
 :: ---- Output ISO path ----------------------------------------
@@ -139,18 +133,13 @@ set "MOUNT_DIR=%TEMP%\WinRepair_mount_%ARCH%_iso"
 :: Step 1: Create WinPE working environment
 :: ============================================================
 echo [1/5] Creating WinPE working environment (%ARCH%)...
-if exist "%WORK_DIR%" (
-    echo       Removing previous working directory...
-    rd /s /q "%WORK_DIR%" 2>nul
-)
+if exist "%WORK_DIR%" echo       Removing previous working directory...
+if exist "%WORK_DIR%" call :remove_dir "%WORK_DIR%"
+
+:: Keep ADK batch tools on normal expansion so ! in paths survives the CALL.
 call "%COPYPE%" %ARCH% "%WORK_DIR%"
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] copype.cmd failed (exit code %errorlevel%).
-    echo         Ensure the WinPE add-on is installed for the ADK.
-    if not defined CI pause
-    exit /b 1
-)
+if errorlevel 1 goto :copype_failed
+
 echo [OK] WinPE working environment created.
 echo.
 
@@ -158,41 +147,21 @@ echo.
 :: Step 2: Inject custom startnet.cmd into the WinPE image
 :: ============================================================
 echo [2/5] Injecting repair startup script into WinPE image...
-if exist "%MOUNT_DIR%" rd /s /q "%MOUNT_DIR%" 2>nul
+if exist "%MOUNT_DIR%" call :remove_dir "%MOUNT_DIR%"
 mkdir "%MOUNT_DIR%"
 
 set "BOOT_WIM=%WORK_DIR%\media\sources\boot.wim"
 
 Dism /Mount-Image /ImageFile:"%BOOT_WIM%" /Index:1 /MountDir:"%MOUNT_DIR%" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] DISM failed to mount boot.wim (exit code %errorlevel%).
-    rd /s /q "%MOUNT_DIR%" 2>nul
-    rd /s /q "%WORK_DIR%" 2>nul
-    if not defined CI pause
-    exit /b 1
-)
+if errorlevel 1 goto :mount_boot_wim_failed
 
 copy /y "%REPO_ROOT%\winpe\startnet.cmd" "%MOUNT_DIR%\Windows\System32\startnet.cmd" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Could not copy startnet.cmd into the WinPE image.
-    Dism /Unmount-Image /MountDir:"%MOUNT_DIR%" /Discard >nul 2>&1
-    rd /s /q "%MOUNT_DIR%" 2>nul
-    rd /s /q "%WORK_DIR%" 2>nul
-    if not defined CI pause
-    exit /b 1
-)
+if errorlevel 1 goto :copy_startnet_failed
 
 Dism /Unmount-Image /MountDir:"%MOUNT_DIR%" /Commit >nul 2>&1
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] DISM failed to commit WinPE image changes (exit code %errorlevel%).
-    rd /s /q "%MOUNT_DIR%" 2>nul
-    rd /s /q "%WORK_DIR%" 2>nul
-    if not defined CI pause
-    exit /b 1
-)
-rd /s /q "%MOUNT_DIR%" 2>nul
+if errorlevel 1 goto :commit_mount_failed
+
+call :remove_dir "%MOUNT_DIR%"
 echo [OK] WinPE startup script injected.
 echo.
 
@@ -203,12 +172,8 @@ echo [3/5] Copying repair scripts into ISO media...
 if not exist "%WORK_DIR%\media\winrepair" mkdir "%WORK_DIR%\media\winrepair"
 
 copy /y "%REPO_ROOT%\winrepair_offline.bat" "%WORK_DIR%\media\winrepair\" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Could not copy winrepair_offline.bat into the ISO media.
-    rd /s /q "%WORK_DIR%" 2>nul
-    if not defined CI pause
-    exit /b 1
-)
+if errorlevel 1 goto :copy_offline_script_failed
+
 copy /y "%REPO_ROOT%\winrepair.bat" "%WORK_DIR%\media\winrepair\" >nul 2>&1
 
 echo [OK] Repair scripts added to ISO media.
@@ -221,13 +186,8 @@ echo [4/5] Creating bootable ISO file...
 echo       Output: %ISO_OUT%
 echo.
 call "%MAKEMEDIA%" /ISO "%WORK_DIR%" "%ISO_OUT%"
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] MakeWinPEMedia /ISO failed (exit code %errorlevel%).
-    rd /s /q "%WORK_DIR%" 2>nul
-    if not defined CI pause
-    exit /b 1
-)
+if errorlevel 1 goto :make_iso_failed
+
 echo [OK] ISO created successfully.
 echo.
 
@@ -235,7 +195,7 @@ echo.
 :: Step 5: Clean up temporary working directory
 :: ============================================================
 echo [5/5] Cleaning up temporary files...
-rd /s /q "%WORK_DIR%" 2>nul
+call :remove_dir "%WORK_DIR%"
 echo [OK] Temporary files removed.
 echo.
 
@@ -270,5 +230,67 @@ echo    4. Boot the VM
 echo.
 echo  After booting from the USB or DVD, the repair tool starts automatically.
 echo.
+call :pause_if_needed
+exit /b 0
+
+:admin_error
+echo.
+echo [ERROR] This script must be run as Administrator.
+echo         Right-click the script and choose "Run as administrator".
+echo.
+call :pause_if_needed
+exit /b 1
+
+:copype_failed
+echo.
+echo [ERROR] copype.cmd failed (exit code %errorlevel%).
+echo         Ensure the WinPE add-on is installed for the ADK.
+call :pause_if_needed
+exit /b 1
+
+:mount_boot_wim_failed
+echo.
+echo [ERROR] DISM failed to mount boot.wim (exit code %errorlevel%).
+call :cleanup_work_dirs
+call :pause_if_needed
+exit /b 1
+
+:copy_startnet_failed
+echo [ERROR] Could not copy startnet.cmd into the WinPE image.
+Dism /Unmount-Image /MountDir:"%MOUNT_DIR%" /Discard >nul 2>&1
+call :cleanup_work_dirs
+call :pause_if_needed
+exit /b 1
+
+:commit_mount_failed
+echo.
+echo [ERROR] DISM failed to commit WinPE image changes (exit code %errorlevel%).
+call :cleanup_work_dirs
+call :pause_if_needed
+exit /b 1
+
+:copy_offline_script_failed
+echo [ERROR] Could not copy winrepair_offline.bat into the ISO media.
+call :cleanup_work_dirs
+call :pause_if_needed
+exit /b 1
+
+:make_iso_failed
+echo.
+echo [ERROR] MakeWinPEMedia /ISO failed (exit code %errorlevel%).
+call :cleanup_work_dirs
+call :pause_if_needed
+exit /b 1
+
+:cleanup_work_dirs
+call :remove_dir "%MOUNT_DIR%"
+call :remove_dir "%WORK_DIR%"
+exit /b 0
+
+:remove_dir
+if exist "%~1" rd /s /q "%~1" 2>nul
+exit /b 0
+
+:pause_if_needed
 if not defined CI pause
 exit /b 0

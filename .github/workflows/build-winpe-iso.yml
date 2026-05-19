@@ -72,7 +72,7 @@ jobs:
             exit /b 1
           )
           call "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\DandISetEnv.bat"
-          build\build_winpe_iso.bat
+          call "%GITHUB_WORKSPACE%\build\build_winpe_iso.bat"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
