@@ -27,12 +27,24 @@ jobs:
       - name: Install Windows ADK
         shell: pwsh
         run: |
-          winget install --id Microsoft.WindowsADK -e --silent --accept-package-agreements --accept-source-agreements
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2196127" -OutFile "$env:TEMP\adksetup.exe"
+          Start-Process -FilePath "$env:TEMP\adksetup.exe" -ArgumentList "/quiet /norestart /ceip off /features OptionId.DeploymentTools" -Wait -NoNewWindow
 
       - name: Install Windows ADK WinPE Add-on
         shell: pwsh
         run: |
-          winget install --id Microsoft.WindowsADK.WinPEAddon -e --silent --accept-package-agreements --accept-source-agreements
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2196224" -OutFile "$env:TEMP\adkwinpesetup.exe"
+          Start-Process -FilePath "$env:TEMP\adkwinpesetup.exe" -ArgumentList "/quiet /norestart /ceip off /features OptionId.WindowsPreinstallationEnvironment" -Wait -NoNewWindow
+
+      - name: Verify ADK installation
+        shell: pwsh
+        run: |
+          $copype = "C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Windows Preinstallation Environment\copype.cmd"
+          if (-not (Test-Path $copype)) {
+            Write-Error "WinPE tools were not installed correctly. Missing: $copype"
+          }
 
       - name: Build WinPE ISO
         shell: cmd
