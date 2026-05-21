@@ -10,6 +10,10 @@ setlocal EnableDelayedExpansion
 :: then runs DISM, SFC, CHKDSK, temp cleanup, network reset,
 :: and a Windows Update scan.
 ::
+:: GPU / Display adapter detection is included: if an NVIDIA
+:: adapter is found, black-screen guidance and optional safe
+:: recovery steps (Fast Startup toggle, PnP rescan) are offered.
+::
 :: If Windows will NOT boot at all, use the offline repair path:
 ::   1. Run build\build_winpe_usb.bat  (on a working PC)
 ::      to create a bootable repair USB from this repository.
@@ -65,11 +69,12 @@ echo  This script will:
 echo    1. Create a System Restore Point  (safety rollback)
 echo    2. Back up your personal files    (non-destructive copy)
 echo    3. Back up the Windows Registry   (safety rollback)
-echo    4. Repair Windows system files    (DISM + SFC)
-echo    5. Schedule a disk check          (runs on next reboot)
-echo    6. Clear temporary files only     (no personal data)
-echo    7. Reset the network stack
-echo    8. Trigger a Windows Update scan
+echo    4. Detect GPU / display adapters  (log info; NVIDIA advisory if found)
+echo    5. Repair Windows system files    (DISM + SFC)
+echo    6. Schedule a disk check          (runs on next reboot)
+echo    7. Clear temporary files only     (no personal data)
+echo    8. Reset the network stack
+echo    9. Trigger a Windows Update scan
 echo.
 echo  Steps 1-3 protect your data BEFORE any changes are made.
 echo  Your personal files (Documents, Desktop, Pictures, etc.)
@@ -215,6 +220,124 @@ echo.
 :: Personal files are never touched below this line.
 :: ============================================================
 
+:: ============================================================
+:: GPU DETECTION & DISPLAY DIAGNOSTICS
+:: ============================================================
+call :section "GPU / DISPLAY ADAPTER DETECTION"
+echo Querying display adapters installed on this system...
+echo.
+
+:: Dump full display adapter details to the backup folder for reference
+set "GPU_INFO_FILE=%BACKUP_DIR%\gpu_info.txt"
+powershell -NoProfile -NonInteractive -Command ^
+  "Get-WmiObject Win32_VideoController | Select-Object Name,DriverVersion,DriverDate,Status | Format-List" ^
+  > "%GPU_INFO_FILE%" 2>&1
+type "%GPU_INFO_FILE%"
+call :log "[OK] GPU info saved to: %GPU_INFO_FILE%"
+
+:: Detect whether any NVIDIA adapter is present
+set "NVIDIA_DETECTED=0"
+for /f "usebackq" %%i in (`powershell -NoProfile -NonInteractive -Command "if (Get-WmiObject Win32_VideoController ^| Where-Object { $_.Name -like '*NVIDIA*' }) { '1' } else { '0' }"`) do (
+    set "NVIDIA_DETECTED=%%i"
+)
+
+if "!NVIDIA_DETECTED!"=="1" (
+    call :log "[INFO] NVIDIA display adapter detected on this system."
+    echo.
+    echo ============================================================
+    echo  NVIDIA GPU DETECTED
+    echo ============================================================
+    echo.
+    echo  An NVIDIA display adapter was found on this system.
+    echo.
+    echo  If you are experiencing a BLACK SCREEN or display issues,
+    echo  the cause may be a corrupt, outdated, or incompatible NVIDIA
+    echo  display driver rather than (or in addition to) a Windows
+    echo  system-file problem.
+    echo.
+    echo  The DISM and SFC steps below repair core Windows system files
+    echo  but do NOT reinstall or replace graphics driver files.
+    echo.
+    echo  Recommended steps if the black screen persists after this repair:
+    echo    1. Boot into Safe Mode:
+    echo         Hold SHIFT at the login screen, click Power > Restart,
+    echo         then choose: Troubleshoot > Advanced options >
+    echo         Startup Settings > Restart > press 4 (Safe Mode).
+    echo    2. In Safe Mode, open Device Manager (devmgmt.msc),
+    echo         expand "Display adapters", right-click the NVIDIA entry,
+    echo         and choose "Uninstall device" (tick "Delete driver software").
+    echo    3. Reboot normally. Windows will fall back to a generic display
+    echo         driver.  Then reinstall the latest NVIDIA driver from:
+    echo         https://www.nvidia.com/drivers
+    echo    4. For a thorough driver cleanup before reinstalling, DDU
+    echo         (Display Driver Uninstaller) can be used from Safe Mode.
+    echo         Download only from https://www.guru3d.com
+    echo         NOTE: DDU is a third-party tool; use at your own discretion.
+    echo.
+
+    :: ----------------------------------------------------------
+    :: OPTIONAL: Disable Fast Startup
+    :: ----------------------------------------------------------
+    echo ============================================================
+    echo  OPTIONAL: Disable Fast Startup
+    echo ============================================================
+    echo.
+    echo  Windows Fast Startup (a form of hibernation) can prevent display
+    echo  drivers from reinitialising correctly after a shutdown, causing
+    echo  a black screen on the next boot.  Disabling it is safe and
+    echo  easily reversed in:
+    echo    Settings ^> System ^> Power ^& Sleep ^> Additional power settings
+    echo    ^> "Choose what the power buttons do" ^> uncheck "Fast startup"
+    echo.
+    set /p "DISABLE_FASTSTARTUP=Disable Fast Startup now? (Y/N) [N]: "
+    if /i "!DISABLE_FASTSTARTUP!"=="Y" (
+        powercfg /h off >> "%LOG_FILE%" 2>&1
+        if !errorlevel! equ 0 (
+            call :log "[OK] Fast Startup (hibernate) disabled via powercfg /h off."
+            echo [OK] Fast Startup disabled.
+        ) else (
+            call :log "[WARN] powercfg /h off returned exit code !errorlevel!."
+            echo [WARN] Could not disable Fast Startup.  See log for details.
+        )
+    ) else (
+        call :log "[SKIP] User declined to disable Fast Startup."
+        echo [SKIP] Fast Startup unchanged.
+    )
+    echo.
+
+    :: ----------------------------------------------------------
+    :: OPTIONAL: Rescan PnP devices
+    :: ----------------------------------------------------------
+    echo ============================================================
+    echo  OPTIONAL: Rescan PnP Devices (refresh Device Manager)
+    echo ============================================================
+    echo.
+    echo  Rescanning PnP devices prompts Windows to re-detect and
+    echo  re-initialise hardware.  This can help if the display adapter
+    echo  shows a yellow warning in Device Manager or is listed as
+    echo  "Unknown Device".  The scan is safe and non-destructive.
+    echo.
+    set /p "PNPSCAN=Rescan PnP devices now? (Y/N) [N]: "
+    if /i "!PNPSCAN!"=="Y" (
+        pnputil /scan-devices >> "%LOG_FILE%" 2>&1
+        if !errorlevel! equ 0 (
+            call :log "[OK] PnP device rescan triggered (pnputil /scan-devices)."
+            echo [OK] PnP device rescan complete.
+        ) else (
+            call :log "[WARN] pnputil /scan-devices returned exit code !errorlevel!."
+            echo [WARN] PnP rescan returned an error.  See log for details.
+        )
+    ) else (
+        call :log "[SKIP] User declined PnP device rescan."
+        echo [SKIP] PnP device rescan skipped.
+    )
+    echo.
+) else (
+    call :log "[INFO] No NVIDIA display adapter detected on this system."
+    echo  No NVIDIA GPU detected on this system.
+)
+echo.
+
 :: ---- Step 1: DISM - Restore Health -------------------------
 call :section "STEP 1: DISM - Restore Windows Image Health"
 echo Repairs the Windows component store.
@@ -335,6 +458,9 @@ echo    Restore Point : created via System Restore
 echo    User files    : %BACKUP_DIR%\UserFiles
 echo    Registry      : %BACKUP_DIR%\Registry
 echo.
+echo  Diagnostics:
+echo    GPU info      : %BACKUP_DIR%\gpu_info.txt
+echo.
 echo  Repair tasks:
 echo    DISM image restore       : done
 echo    SFC system file scan     : done
@@ -349,6 +475,8 @@ call :log "============================================================"
 call :log "Repair script finished at %DATE% %TIME%"
 
 echo A reboot is recommended to complete all repairs.
+echo If you have an NVIDIA GPU and still experience a black screen
+echo after rebooting, see the GPU advisory above (and in the log).
 echo.
 set /p "REBOOT=Reboot now? (Y/N): "
 if /i "%REBOOT%"=="Y" (
