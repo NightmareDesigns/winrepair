@@ -14,6 +14,7 @@ setlocal EnableDelayedExpansion
 ::   DETECT  - scan drives, let user pick target & backup drive
 ::   SAFETY A - Robocopy user profiles to backup drive
 ::   SAFETY B - copy raw Registry hive files to backup drive
+::   GPU     - detect NVIDIA driver files; log advisory if found
 ::   REPAIR 1 - DISM offline image repair
 ::   REPAIR 2 - SFC offline system-file scan
 ::   REPAIR 3 - CHKDSK (runs immediately; target drive is idle)
@@ -83,6 +84,9 @@ echo.
 echo    SAFETY  (all completed BEFORE any repair step runs):
 echo      A. Back up user profile folders  (Robocopy - non-destructive copy)
 echo      B. Back up Registry hive files   (raw file copy from offline install)
+echo.
+echo    DIAGNOSTICS:
+echo      GPU. Detect NVIDIA driver files; log black-screen advisory if found
 echo.
 echo    REPAIR  (only after both safety backups succeed):
 echo      1. DISM    - Repair the offline Windows component store / image
@@ -382,6 +386,73 @@ echo ============================================================
 echo.
 
 :: ============================================================
+:: GPU / DISPLAY ADAPTER DETECTION (Offline)
+:: ============================================================
+call :section "GPU / DISPLAY ADAPTER DETECTION (Offline)"
+echo Checking for NVIDIA display adapter in offline installation...
+echo.
+
+:: WinPE cannot load the offline GPU driver, but we can look for NVIDIA
+:: driver files inside the offline Windows DriverStore.  This is purely
+:: informational - no driver files are removed or modified.
+set "NVIDIA_OFFLINE=0"
+
+:: Check the offline DriverStore for any NVIDIA-prefixed driver package
+for /d %%D in ("%TARGET_WIN%\System32\DriverStore\FileRepository\nv*") do (
+    if "!NVIDIA_OFFLINE!"=="0" (
+        set "NVIDIA_OFFLINE=1"
+        call :log "  NVIDIA driver folder detected: %%D"
+        echo   NVIDIA driver folder: %%D
+    )
+)
+
+:: Also check for common NVIDIA runtime DLLs as a secondary indicator
+if "!NVIDIA_OFFLINE!"=="0" (
+    if exist "%TARGET_WIN%\System32\nvapi64.dll" (
+        set "NVIDIA_OFFLINE=1"
+        call :log "  NVIDIA runtime DLL detected: nvapi64.dll"
+        echo   NVIDIA runtime: nvapi64.dll
+    )
+)
+
+if "!NVIDIA_OFFLINE!"=="1" (
+    call :log "[INFO] NVIDIA GPU driver installation detected on %TARGET_ROOT%."
+    echo.
+    echo  NVIDIA GPU driver detected on %TARGET_ROOT%
+    echo.
+    echo  If this machine shows a BLACK SCREEN at boot, the display driver
+    echo  may be corrupt or incompatible - not necessarily a Windows
+    echo  system-file issue.  DISM and SFC (below) repair core Windows
+    echo  files but do NOT reinstall or replace graphics driver files.
+    echo.
+    echo  NOTE: In offline (WinPE) mode, GPU driver repair is limited.
+    echo  After this repair session boots Windows, if the black screen
+    echo  persists, follow these steps:
+    echo.
+    echo    1. Boot into Safe Mode:
+    echo         Hold SHIFT at the login screen, click Power > Restart,
+    echo         then: Troubleshoot > Advanced options > Startup Settings
+    echo         > Restart > press 4 (Safe Mode without networking).
+    echo    2. In Safe Mode open Device Manager (devmgmt.msc), expand
+    echo         "Display adapters", right-click the NVIDIA entry, and
+    echo         choose "Uninstall device" (tick "Delete driver software").
+    echo    3. Reboot normally. Windows falls back to a generic driver.
+    echo         Then reinstall the latest NVIDIA driver from:
+    echo         https://www.nvidia.com/drivers
+    echo    4. For a deeper cleanup before reinstalling, DDU (Display
+    echo         Driver Uninstaller) can be run from Safe Mode.
+    echo         Download only from https://www.guru3d.com
+    echo         NOTE: DDU is a third-party tool; use at your own discretion.
+    echo.
+    call :log "[INFO] NVIDIA black-screen advisory written to log."
+) else (
+    call :log "[INFO] No NVIDIA driver installation detected on %TARGET_ROOT%."
+    echo  No NVIDIA GPU driver detected on this installation.
+    echo  Display driver issues are unlikely to be the cause of the boot failure.
+)
+echo.
+
+:: ============================================================
 :: REPAIR 1  -  Offline DISM Image Repair
 :: ============================================================
 call :section "REPAIR 1: DISM - Offline Windows Image Repair"
@@ -573,6 +644,7 @@ echo    User profiles  : %BACKUP_DIR%\Users
 echo    Registry hives : %BACKUP_DIR%\Registry
 echo.
 echo  Repair tasks completed:
+echo    GPU detection             : done  (check log for NVIDIA advisory^)
 echo    DISM offline image repair : done  (check log for warnings^)
 echo    SFC offline system scan   : done  (check log for warnings^)
 echo    CHKDSK disk error check   : done
@@ -585,6 +657,8 @@ echo    %LOG_FILE%
 echo.
 echo  NEXT STEP: Remove the repair USB and reboot.  Windows should now start.
 echo  If Windows still does not boot, consult the log for DISM / bootrec errors.
+echo  If you have an NVIDIA GPU and see only a black screen after booting,
+echo  see the GPU advisory above in the log and follow the Safe Mode steps.
 echo.
 call :log "============================================================"
 call :log "WinPE Offline Repair completed at %DATE% %TIME%"

@@ -123,6 +123,7 @@ All backups are created **before the first repair step runs**.
 | A | System Restore Point | Safety snapshot before anything changes |
 | B | User file backup | Robocopy of personal folders to backup drive |
 | C | Registry export | Full `.reg` backup of HKLM and HKCU |
+| GPU | **GPU detection** | Queries all display adapters via `Win32_VideoController`; logs names, driver versions, and driver dates.  If an NVIDIA adapter is found, a black-screen advisory and optional recovery steps are offered (see [NVIDIA GPU & Black-Screen Troubleshooting](#nvidia-gpu--black-screen-troubleshooting)) |
 | 1 | **DISM** `RestoreHealth` | Repairs the Windows component store / image |
 | 2 | **SFC** `scannow` | Scans and restores corrupted protected system files |
 | 3 | **CHKDSK** `/f` | Schedules a filesystem check (runs on next reboot) |
@@ -136,6 +137,7 @@ All backups are created **before the first repair step runs**.
 |---|------|--------------|
 | A | User profile backup | Robocopy of all user profiles from offline drive |
 | B | Registry hive backup | Raw copy of hive files from `Windows\System32\config` |
+| GPU | **GPU detection** | Scans the offline DriverStore for NVIDIA driver packages and runtime DLLs; logs an NVIDIA black-screen advisory if found (see [NVIDIA GPU & Black-Screen Troubleshooting](#nvidia-gpu--black-screen-troubleshooting)) |
 | 1 | **DISM** `/Image:` | Repairs the offline Windows image (no reboot needed) |
 | 2 | **SFC** `/offwindir:` | Scans and repairs offline system files |
 | 3 | **CHKDSK** `/f` (or `/r`) | Fixes filesystem errors immediately (drive is not in use) |
@@ -158,9 +160,10 @@ All backups are created **before the first repair step runs**.
     │   ├── Music\
     │   ├── Pictures\
     │   └── Videos\
-    └── Registry\
-        ├── HKLM.reg
-        └── HKCU.reg
+    ├── Registry\
+    │   ├── HKLM.reg
+    │   └── HKCU.reg
+    └── gpu_info.txt        (display adapter names, driver versions, driver dates)
 
 <script folder>\logs\winrepair_<date>_<time>.log
 ```
@@ -223,6 +226,44 @@ All backups are created **before the first repair step runs**.
 
 ---
 
+## NVIDIA GPU & Black-Screen Troubleshooting
+
+Both scripts now detect NVIDIA display adapters and log an advisory whenever one is found.  A **black screen** (display stays black after the Windows boot animation, or after login) on a system with an NVIDIA GPU is almost always caused by a display-driver issue rather than a corrupted Windows image — though both can occur together.
+
+### What the scripts do
+
+| Mode | Action |
+|------|--------|
+| **Online** (`winrepair.bat`) | Queries `Win32_VideoController` via PowerShell; logs all adapter names, driver versions, and driver dates to `gpu_info.txt` in the backup folder.  If an NVIDIA adapter is found, an advisory is printed and two **optional, reversible** steps are offered. |
+| **Offline** (`winrepair_offline.bat`) | Scans `Windows\System32\DriverStore\FileRepository\nv*` and checks for `nvapi64.dll` in the offline installation.  Logs an advisory if NVIDIA driver files are found.  No driver files are removed or modified. |
+
+### Optional steps offered in online mode
+
+| Step | Command | What it does | How to reverse |
+|------|---------|--------------|----------------|
+| **Disable Fast Startup** | `powercfg /h off` | Disables the hybrid-shutdown/hibernation feature that can prevent display drivers re-initialising correctly on the next boot | Re-enable in *Settings → System → Power & Sleep → Additional power settings → Choose what the power buttons do → Turn on fast startup* |
+| **Rescan PnP devices** | `pnputil /scan-devices` | Asks Windows to re-detect all plug-and-play hardware — can clear a "missing" or error-flagged display adapter without a reboot | No reversal needed; a benign hardware re-enumeration |
+
+### If the black screen persists after running the repair
+
+1. **Boot into Safe Mode** — hold **Shift** at the Windows login screen, click *Power → Restart*, then choose *Troubleshoot → Advanced options → Startup Settings → Restart → press 4*.
+2. In Safe Mode, open **Device Manager** (`devmgmt.msc`), expand *Display adapters*, right-click the NVIDIA entry, and choose **Uninstall device** (check *Delete the driver software for this device*).
+3. Reboot normally.  Windows falls back to a generic Microsoft display driver.
+4. Download and install the latest driver for your GPU from **https://www.nvidia.com/drivers**.
+5. For a thorough driver cleanup before reinstalling, **DDU (Display Driver Uninstaller)** can be run from Safe Mode — download only from **https://www.guru3d.com**.  DDU is a third-party tool; it is not bundled with this toolkit.
+
+ > **Note for RTX 30 / 40 / 50 series users:** make sure you select the correct GPU series and Windows version on the NVIDIA driver download page.  Installing a mismatched driver package is a common cause of black-screen regressions.  If you are unsure which driver to download, use the NVIDIA Automatic Driver Search and enter your exact GPU model.
+
+### Limitations in offline (WinPE) mode
+
+WinPE does not load the live GPU driver, so no driver-level diagnostics can be performed from the offline environment.  The offline script can only:
+- Detect the presence of NVIDIA driver files in the offline installation.
+- Log the advisory and next steps to the repair log.
+
+For driver-level repair, follow the Safe Mode instructions above after booting into Windows.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Likely cause | What to try |
@@ -232,6 +273,9 @@ All backups are created **before the first repair step runs**.
 | Windows still won't boot after repair | BCD is missing or EFI partition is corrupt | Run `bcdboot C:\Windows /s S: /f UEFI` where `S:` is the EFI System Partition (use `diskpart` to find it) |
 | No Windows installation detected | Drive not connected, or WinPE enumeration still in progress | Wait 30 s, close the script, and run `winrepair_offline.bat` again from `D:\winrepair\` |
 | USB drive not detected by BIOS | Secure Boot or Fast Boot blocking USB | Disable Fast Boot and/or Secure Boot temporarily in UEFI firmware settings |
+| **Black screen after boot (NVIDIA GPU)** | Corrupt or incompatible display driver | Run `winrepair.bat` online; accept the optional "Disable Fast Startup" and "Rescan PnP devices" prompts.  If the black screen persists, boot into Safe Mode, uninstall the NVIDIA display driver, reboot, then reinstall the latest driver from https://www.nvidia.com/drivers |
+| **Black screen — Safe Mode also black** | Driver corruption so severe the GPU cannot initialise even in Safe Mode | Boot into WinPE (run `winrepair_offline.bat`) for DISM/SFC repair, then reinstall the NVIDIA driver after Windows boots with a generic VGA driver |
+| **GPU shown with yellow error in Device Manager** | Driver mismatch or incomplete installation | Run the optional PnP rescan step in `winrepair.bat`, or reinstall the driver from https://www.nvidia.com/drivers |
 
 ---
 
@@ -251,3 +295,6 @@ Personal data must remain intact across all runs.
 | Multiple Windows installs | Two Windows partitions on one disk | Script lists both; user selects one; only selected partition is repaired |
 | Dual-drive setup | Windows on C:, backup on E: | User profiles backed up to E:; repair runs on C:; E: untouched |
 | Large profile (50 GB+) | User has 50 GB of documents | Robocopy completes without timeout; no files missing from backup |
+| **NVIDIA GPU present (online)** | `Win32_VideoController` returns an NVIDIA adapter | GPU info logged to `gpu_info.txt`; NVIDIA advisory displayed; optional Fast Startup and PnP rescan steps offered |
+| **No NVIDIA GPU (online)** | Only non-NVIDIA adapters present | "No NVIDIA GPU detected" message logged; advisory section skipped |
+| **NVIDIA driver files present (offline)** | `DriverStore\FileRepository\nv*` exists in offline install | NVIDIA advisory and Safe Mode instructions logged; no driver files removed |
