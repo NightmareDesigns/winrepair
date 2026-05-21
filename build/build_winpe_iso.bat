@@ -92,6 +92,13 @@ call :pause_if_needed
 exit /b 1
 
 :have_offline_script
+if exist "%REPO_ROOT%\winrepair.bat" goto :have_online_script
+echo [ERROR] winrepair.bat not found at %REPO_ROOT%
+echo         Run this script from the build\ subfolder of the repository.
+call :pause_if_needed
+exit /b 1
+
+:have_online_script
 if exist "%REPO_ROOT%\winpe\startnet.cmd" goto :have_startnet
 echo [ERROR] winpe\startnet.cmd not found at %REPO_ROOT%\winpe\
 echo         Run this script from the build\ subfolder of the repository.
@@ -175,6 +182,7 @@ copy /y "%REPO_ROOT%\winrepair_offline.bat" "%WORK_DIR%\media\winrepair\" >nul 2
 if errorlevel 1 goto :copy_offline_script_failed
 
 copy /y "%REPO_ROOT%\winrepair.bat" "%WORK_DIR%\media\winrepair\" >nul 2>&1
+if errorlevel 1 goto :copy_online_script_failed
 
 echo [OK] Repair scripts added to ISO media.
 echo.
@@ -271,6 +279,12 @@ exit /b 1
 
 :copy_offline_script_failed
 echo [ERROR] Could not copy winrepair_offline.bat into the ISO media.
+call :cleanup_work_dirs
+call :pause_if_needed
+exit /b 1
+
+:copy_online_script_failed
+echo [ERROR] Could not copy winrepair.bat into the ISO media.
 call :cleanup_work_dirs
 call :pause_if_needed
 exit /b 1
